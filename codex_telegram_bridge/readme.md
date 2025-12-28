@@ -77,8 +77,6 @@ uv run tmux-notify --tmux-target "codex1:0.0" --text "$TURN_TEXT"
 Add `--chat-id` if `chat_id` is not set in `~/.codex/telegram.toml`.
 
 ## Files
-
-- `src/codex_telegram_bridge/bridge_common.py`: compatibility re-exports
 - `src/codex_telegram_bridge/constants.py`: limits and config path constants
 - `src/codex_telegram_bridge/config.py`: config loading and chat-id parsing helpers
 - `src/codex_telegram_bridge/rendering.py`: markdown rendering + chunking
