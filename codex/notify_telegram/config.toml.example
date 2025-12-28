@@ -1,1 +1,0 @@
-notify = ["uv", "run", "/Users/YOU/path/to/agents/codex/notify_telegram/notify_telegram.py"]

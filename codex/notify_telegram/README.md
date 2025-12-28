@@ -5,8 +5,8 @@ Send Codex completion summaries to Telegram with safe Markdown rendering and sta
 ## Install
 
 1. Ensure `uv` is installed.
-2. Copy the script into your repo (already in this folder).
-3. Create your Telegram creds file at `~/.codex/telegram.json`.
+2. Copy the script to `/Users/name/.codex/notify_telegram.py`.
+3. Create your Telegram creds file at `/Users/name/.codex/telegram.json`.
 
 Example:
 
@@ -22,7 +22,7 @@ Example:
 Add a `notify` entry to `~/.codex/config.toml`:
 
 ```toml
-notify = ["uv", "run", "/absolute/path/to/agents/codex/notify_telegram/notify_telegram.py"]
+notify = ["uv", "run", "/Users/name/.codex/notify_telegram.py"]
 ```
 
 ## Notes
@@ -34,5 +34,3 @@ notify = ["uv", "run", "/absolute/path/to/agents/codex/notify_telegram/notify_te
 ## Files
 
 - `notify_telegram.py`: the notifier script
-- `telegram.json.example`: sample credentials file
-- `config.toml.example`: sample Codex `notify` config line
