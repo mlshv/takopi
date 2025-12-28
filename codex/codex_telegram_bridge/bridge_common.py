@@ -139,6 +139,13 @@ class TelegramClient:
             sent.append(msg)
         return sent
 
+    def send_chat_action(self, chat_id: int, action: str = "typing") -> Dict[str, Any]:
+        params: Dict[str, Any] = {
+            "chat_id": chat_id,
+            "action": action,
+        }
+        return self._call("sendChatAction", params)
+
 
 @dataclass(frozen=True)
 class Route:

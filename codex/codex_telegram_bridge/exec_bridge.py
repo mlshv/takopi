@@ -193,6 +193,11 @@ def main() -> None:
             f"chat_id={chat_id} user_msg_id={user_msg_id} resume_session={resume_session!r}"
         )
         try:
+            try:
+                bot.send_chat_action(chat_id=chat_id, action="typing")
+                log(f"[handle] sent typing indicator chat_id={chat_id}")
+            except Exception as e:
+                log(f"[handle] failed typing indicator chat_id={chat_id}: {e}")
             session_id, answer = runner.run_serialized(text, resume_session)
             sent_msgs = bot.send_message_chunked(
                 chat_id=chat_id,
