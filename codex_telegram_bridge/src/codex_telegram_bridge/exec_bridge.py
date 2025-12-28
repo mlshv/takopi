@@ -68,7 +68,6 @@ def setup_logging(log_file: str | None) -> None:
 
 TELEGRAM_TEXT_LIMIT = TELEGRAM_HARD_LIMIT
 TELEGRAM_MARKDOWN_LIMIT = 3500
-ELLIPSIS = "…"
 
 
 def _clamp_tg_text(text: str, limit: int = TELEGRAM_TEXT_LIMIT) -> str:
@@ -85,18 +84,14 @@ def _send_markdown(
     reply_to_message_id: int | None = None,
     disable_notification: bool = False,
 ) -> dict[str, Any]:
-    rendered_text, entities = render_markdown(text)
-    if len(rendered_text) > TELEGRAM_MARKDOWN_LIMIT:
-        sep = "\n" + ELLIPSIS + "\n"
-        lines = rendered_text.splitlines()
-        tail = lines[-1] if lines else ""
-        max_head = max(0, TELEGRAM_MARKDOWN_LIMIT - len(sep) - len(tail))
-        rendered_text = rendered_text[:max_head] + sep + tail
+    rendered, entities = render_markdown(text)
+    if len(rendered) > TELEGRAM_MARKDOWN_LIMIT:
+        rendered = rendered[: TELEGRAM_MARKDOWN_LIMIT - 20] + "\n…(truncated)"
         entities = None
     return bot.send_message(
         chat_id=chat_id,
-        text=rendered_text,
-        entities=entities or None,
+        text=rendered,
+        entities=entities,
         reply_to_message_id=reply_to_message_id,
         disable_notification=disable_notification,
     )
