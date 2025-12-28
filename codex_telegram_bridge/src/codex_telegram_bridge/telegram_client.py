@@ -5,12 +5,6 @@ import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Optional
 
-from .constants import DEFAULT_CHUNK_LEN, TELEGRAM_HARD_LIMIT
-from .rendering import render_markdown
-
-ELLIPSIS = "…"
-
-
 class TelegramClient:
     """
     Minimal Telegram Bot API client using standard library (no requests dependency).
@@ -100,32 +94,3 @@ class TelegramClient:
         }
         res = self._call("deleteMessage", params)
         return bool(res)
-
-    def send_message_markdown_chunked(
-        self,
-        chat_id: int,
-        text: str,
-        reply_to_message_id: Optional[int] = None,
-        disable_notification: bool = False,
-        chunk_len: int = DEFAULT_CHUNK_LEN,
-    ) -> List[Dict[str, Any]]:
-        rendered_text, entities = render_markdown(text)
-        limit = min(chunk_len, TELEGRAM_HARD_LIMIT)
-        if len(rendered_text) > limit:
-            # If we truncate, drop entities to avoid offset gymnastics.
-            # Preserve the final `resume: `...`` line if present.
-            sep = "\n" + ELLIPSIS + "\n"
-            lines = rendered_text.splitlines()
-            tail = lines[-1] if lines else ""
-            max_head = max(0, limit - len(sep) - len(tail))
-            rendered_text = "".join([rendered_text[:max_head], sep, tail])
-            entities = None
-
-        msg = self.send_message(
-            chat_id=chat_id,
-            text=rendered_text,
-            reply_to_message_id=reply_to_message_id,
-            disable_notification=disable_notification,
-            entities=entities or None,
-        )
-        return [msg]

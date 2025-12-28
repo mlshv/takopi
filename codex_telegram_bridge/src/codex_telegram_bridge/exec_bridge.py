@@ -63,12 +63,38 @@ def _one_line(text: Optional[str]) -> str:
 
 
 TELEGRAM_TEXT_LIMIT = TELEGRAM_HARD_LIMIT
+TELEGRAM_MARKDOWN_LIMIT = 3500
+ELLIPSIS = "…"
 
 
 def _clamp_tg_text(text: str, limit: int = TELEGRAM_TEXT_LIMIT) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 20] + "\n...(truncated)"
+
+def _send_markdown(
+    bot: TelegramClient,
+    *,
+    chat_id: int,
+    text: str,
+    reply_to_message_id: Optional[int] = None,
+    disable_notification: bool = False,
+) -> Dict[str, Any]:
+    rendered_text, entities = render_markdown(text)
+    if len(rendered_text) > TELEGRAM_MARKDOWN_LIMIT:
+        sep = "\n" + ELLIPSIS + "\n"
+        lines = rendered_text.splitlines()
+        tail = lines[-1] if lines else ""
+        max_head = max(0, TELEGRAM_MARKDOWN_LIMIT - len(sep) - len(tail))
+        rendered_text = rendered_text[:max_head] + sep + tail
+        entities = None
+    return bot.send_message(
+        chat_id=chat_id,
+        text=rendered_text,
+        entities=entities or None,
+        reply_to_message_id=reply_to_message_id,
+        disable_notification=disable_notification,
+    )
 
 
 class ProgressEditor:
@@ -488,11 +514,7 @@ def run(
                 except Exception as ee:
                     log(f"[handle] failed to edit progress into error: {ee}")
 
-            sent_msgs = bot.send_message_markdown_chunked(
-                chat_id=chat_id,
-                text=err,
-                reply_to_message_id=user_msg_id,
-            )
+            _send_markdown(bot, chat_id=chat_id, text=err, reply_to_message_id=user_msg_id)
             log(
                 "[handle] error "
                 f"chat_id={chat_id} user_msg_id={user_msg_id} resume_session={resume_session!r} err={e}"
@@ -511,11 +533,7 @@ def run(
         can_edit_final = progress_id is not None and len(final_text) <= TELEGRAM_TEXT_LIMIT
 
         if loud_final or not can_edit_final:
-            sent_msgs = bot.send_message_markdown_chunked(
-                chat_id=chat_id,
-                text=final_md,
-                reply_to_message_id=user_msg_id,
-            )
+            _send_markdown(bot, chat_id=chat_id, text=final_md, reply_to_message_id=user_msg_id)
             if progress_id is not None:
                 try:
                     bot.delete_message(chat_id=chat_id, message_id=progress_id)
