@@ -351,14 +351,19 @@ def _parse_bridge_config(
         token = config["bot_token"]
     except KeyError:
         raise ConfigError(f"Missing key `bot_token` in {config_path}.") from None
+    if not isinstance(token, str) or not token.strip():
+        raise ConfigError(
+            f"Invalid `bot_token` in {config_path}; expected a non-empty string."
+        ) from None
     try:
-        chat_id = int(config["chat_id"])
+        chat_id_value = config["chat_id"]
     except KeyError:
         raise ConfigError(f"Missing key `chat_id` in {config_path}.") from None
-    except (TypeError, ValueError):
+    if isinstance(chat_id_value, bool) or not isinstance(chat_id_value, int):
         raise ConfigError(
             f"Invalid `chat_id` in {config_path}; expected an integer."
         ) from None
+    chat_id = chat_id_value
 
     codex_cmd = shutil.which("codex")
     if not codex_cmd:

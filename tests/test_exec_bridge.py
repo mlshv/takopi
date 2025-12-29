@@ -1,11 +1,43 @@
 import asyncio
 
+import pytest
+
 from takopi.exec_bridge import (
     extract_session_id,
     prepare_telegram,
     resolve_resume_session,
     truncate_for_telegram,
 )
+
+
+def _patch_config(monkeypatch, config):
+    from pathlib import Path
+
+    from takopi import exec_bridge
+
+    monkeypatch.setattr(
+        exec_bridge,
+        "load_telegram_config",
+        lambda: (config, Path("takopi.toml")),
+    )
+
+
+def test_parse_bridge_config_rejects_empty_token(monkeypatch) -> None:
+    from takopi import exec_bridge
+
+    _patch_config(monkeypatch, {"bot_token": "   ", "chat_id": 123})
+
+    with pytest.raises(exec_bridge.ConfigError, match="bot_token"):
+        exec_bridge._parse_bridge_config(final_notify=True, profile=None)
+
+
+def test_parse_bridge_config_rejects_string_chat_id(monkeypatch) -> None:
+    from takopi import exec_bridge
+
+    _patch_config(monkeypatch, {"bot_token": "token", "chat_id": "123"})
+
+    with pytest.raises(exec_bridge.ConfigError, match="chat_id"):
+        exec_bridge._parse_bridge_config(final_notify=True, profile=None)
 
 
 def test_extract_session_id_finds_uuid_v7() -> None:
