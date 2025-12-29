@@ -121,7 +121,7 @@ def truncate_for_telegram(text: str, limit: int) -> str:
     return (head + sep + tail)[:limit]
 
 
-def render_for_telegram(
+def prepare_telegram(
     md: str, *, limit: int
 ) -> tuple[str, list[dict[str, Any]] | None]:
     rendered, entities = render_markdown(md)
@@ -131,22 +131,47 @@ def render_for_telegram(
     return rendered, entities or None
 
 
-async def _send_markdown(
+async def _send_or_edit_markdown(
     bot: TelegramClient,
     *,
     chat_id: int,
     text: str,
+    edit_message_id: int | None = None,
     reply_to_message_id: int | None = None,
     disable_notification: bool = False,
-) -> dict[str, Any]:
-    rendered, entities = render_for_telegram(text, limit=TELEGRAM_MARKDOWN_LIMIT)
+    edit_limit: int = TELEGRAM_TEXT_LIMIT,
+    send_limit: int = TELEGRAM_MARKDOWN_LIMIT,
+) -> tuple[dict[str, Any], bool]:
+    if edit_message_id is not None:
+        rendered, entities = prepare_telegram(text, limit=edit_limit)
+        try:
+            return (
+                await bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=edit_message_id,
+                    text=rendered,
+                    entities=entities,
+                ),
+                True,
+            )
+        except Exception as e:
+            logger.info(
+                "[tg] edit failed chat_id=%s message_id=%s: %s",
+                chat_id,
+                edit_message_id,
+                e,
+            )
 
-    return await bot.send_message(
-        chat_id=chat_id,
-        text=rendered,
-        entities=entities,
-        reply_to_message_id=reply_to_message_id,
-        disable_notification=disable_notification,
+    rendered, entities = prepare_telegram(text, limit=send_limit)
+    return (
+        await bot.send_message(
+            chat_id=chat_id,
+            text=rendered,
+            entities=entities,
+            reply_to_message_id=reply_to_message_id,
+            disable_notification=disable_notification,
+        ),
+        False,
     )
 
 
@@ -434,7 +459,7 @@ async def _handle_message(
     async def _edit_progress(md: str) -> None:
         if progress_id is None:
             return
-        rendered, entities = render_for_telegram(md, limit=TELEGRAM_TEXT_LIMIT)
+        rendered, entities = prepare_telegram(md, limit=TELEGRAM_TEXT_LIMIT)
         logger.debug(
             "[progress] edit message_id=%s md=%s rendered=%s entities=%s",
             progress_id,
@@ -459,7 +484,7 @@ async def _handle_message(
 
     try:
         initial_md = progress_renderer.render_progress(0.0)
-        initial_rendered, initial_entities = render_for_telegram(
+        initial_rendered, initial_entities = prepare_telegram(
             initial_md, limit=TELEGRAM_TEXT_LIMIT
         )
         logger.debug(
@@ -511,26 +536,16 @@ async def _handle_message(
                 await asyncio.gather(edit_task, return_exceptions=True)
 
             err = _clamp_tg_text(f"Error:\n{e}")
-            if progress_id is not None and len(err) <= TELEGRAM_TEXT_LIMIT:
-                try:
-                    logger.debug(
-                        "[error] edit message_id=%s text=%s", progress_id, err
-                    )
-                    await cfg.bot.edit_message_text(
-                        chat_id=chat_id, message_id=progress_id, text=err
-                    )
-                    return
-                except Exception:
-                    pass
-            logger.debug(
-                "[error] send reply_to=%s text=%s", user_msg_id, err
-            )
-            await _send_markdown(
+            logger.debug("[error] send reply_to=%s text=%s", user_msg_id, err)
+            await _send_or_edit_markdown(
                 cfg.bot,
                 chat_id=chat_id,
                 text=err,
+                edit_message_id=progress_id,
                 reply_to_message_id=user_msg_id,
                 disable_notification=True,
+                edit_limit=TELEGRAM_TEXT_LIMIT,
+                send_limit=TELEGRAM_MARKDOWN_LIMIT,
             )
             return
 
@@ -547,41 +562,39 @@ async def _handle_message(
     logger.debug("[final] markdown: %s", final_md)
     final_rendered, final_entities = render_markdown(final_md)
     can_edit_final = progress_id is not None and len(final_rendered) <= TELEGRAM_TEXT_LIMIT
+    edit_message_id = None if cfg.final_notify or not can_edit_final else progress_id
 
-    if cfg.final_notify or not can_edit_final:
+    if edit_message_id is None:
         logger.debug(
             "[final] send reply_to=%s rendered=%s entities=%s",
             user_msg_id,
             final_rendered,
             final_entities,
         )
-        await _send_markdown(
-            cfg.bot,
-            chat_id=chat_id,
-            text=final_md,
-            reply_to_message_id=user_msg_id,
-            disable_notification=False,
-        )
-        if progress_id is not None:
-            try:
-                logger.debug("[final] delete progress message_id=%s", progress_id)
-                await cfg.bot.delete_message(chat_id=chat_id, message_id=progress_id)
-            except Exception:
-                pass
     else:
-        assert progress_id is not None
         logger.debug(
             "[final] edit message_id=%s rendered=%s entities=%s",
-            progress_id,
+            edit_message_id,
             final_rendered,
             final_entities,
         )
-        await cfg.bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=progress_id,
-            text=final_rendered,
-            entities=final_entities or None,
-        )
+
+    _, edited = await _send_or_edit_markdown(
+        cfg.bot,
+        chat_id=chat_id,
+        text=final_md,
+        edit_message_id=edit_message_id,
+        reply_to_message_id=user_msg_id,
+        disable_notification=False,
+        edit_limit=TELEGRAM_TEXT_LIMIT,
+        send_limit=TELEGRAM_MARKDOWN_LIMIT,
+    )
+    if progress_id is not None and (edit_message_id is None or not edited):
+        try:
+            logger.debug("[final] delete progress message_id=%s", progress_id)
+            await cfg.bot.delete_message(chat_id=chat_id, message_id=progress_id)
+        except Exception:
+            pass
 
 
 async def poll_updates(cfg: BridgeConfig):
