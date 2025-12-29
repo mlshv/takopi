@@ -283,7 +283,7 @@ class CodexExecRunner:
 
                 try:
                     rc = await asyncio.wait_for(proc.wait(), timeout=2.0)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     logger.debug(
                         "[codex] terminate timed out pid=%s, sending kill", proc.pid
                     )
@@ -595,6 +595,7 @@ async def _handle_message(
             except Exception:
                 pass
     else:
+        assert progress_id is not None
         logger.debug(
             "[final] edit message_id=%s rendered=%s entities=%s",
             progress_id,
