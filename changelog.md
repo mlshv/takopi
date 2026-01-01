@@ -2,6 +2,8 @@
 
 ## unreleased
 
+## v0.3.0 (2026-01-01)
+
 ### changes
 
 - add a claude code runner via the `claude` CLI with stream-json parsing and resume support
