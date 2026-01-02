@@ -1,7 +1,7 @@
 [project]
 name = "takopi"
 authors = [{name = "banteg"}]
-version = "0.5.0"
+version = "0.5.1"
 description = "Telegram bridge for Codex, Claude Code, and other agent CLIs."
 readme = "readme.md"
 license = { file = "LICENSE" }
@@ -29,7 +29,6 @@ Issues = "https://github.com/banteg/takopi/issues"
 
 [project.scripts]
 takopi = "takopi.cli:main"
-takopi-debug-onboarding = "takopi.debug_onboarding:main"
 
 [build-system]
 requires = ["uv_build>=0.9.18,<0.10.0"]
