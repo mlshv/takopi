@@ -20,7 +20,7 @@ All config lives in `~/.takopi/takopi.toml`.
 ```toml
 default_engine = "codex"       # optional
 default_project = "z80"        # optional
-transport = "telegram"         # required
+transport = "telegram"         # optional, defaults to "telegram"
 
 [transports.telegram]
 bot_token = "..."              # required
@@ -32,6 +32,9 @@ worktrees_dir = ".worktrees"   # optional, default ".worktrees"
 default_engine = "codex"       # optional, per-project override
 worktree_base = "master"       # optional, base for new branches
 ```
+
+Legacy config note: top-level `bot_token` / `chat_id` are auto-migrated into
+`[transports.telegram]` on startup.
 
 Note on `worktrees_dir`:
 
@@ -49,6 +52,7 @@ Validation rules:
 - `default_project` must match a configured project alias.
 - Project aliases cannot collide with engine ids or reserved commands (`/cancel`).
 - `default_engine` and per-project `default_engine` must be valid engine ids.
+- `transport` defaults to `"telegram"` when omitted; override per-run with `--transport`.
 
 ## `takopi init`
 

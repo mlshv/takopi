@@ -53,6 +53,7 @@ global config `~/.takopi/takopi.toml`
 ```toml
 default_engine = "codex"
 
+# optional, defaults to "telegram"
 transport = "telegram"
 
 [transports.telegram]
@@ -81,7 +82,7 @@ provider = "openai"
 extra_args = ["--no-color"]
 ```
 
-note: configs with top-level `bot_token` / `chat_id` must be migrated to `[transports.telegram]`.
+note: configs with top-level `bot_token` / `chat_id` are migrated to `[transports.telegram]` on startup.
 
 ## projects
 
@@ -120,6 +121,13 @@ takopi
 takopi claude
 takopi opencode
 takopi pi
+```
+
+list available transports (and override in a run):
+
+```sh
+takopi transports
+takopi --transport telegram
 ```
 
 resume lines always route to the matching engine; subcommands only override the default for new threads.

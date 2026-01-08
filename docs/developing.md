@@ -77,12 +77,25 @@ Defines `Transport`, `MessageRef`, `RenderedMessage`, and `SendOptions`.
 
 Defines a renderer that converts `ProgressState` into `RenderedMessage` outputs.
 
+### `transports.py` - Transport registry
+
+Defines the transport backend protocol, registry helpers, and built-in transport registration.
+
+### `config_migrations.py` - Config migrations
+
+Applies one-time edits to on-disk config (e.g., legacy Telegram key migration) before
+`TakopiSettings` validation runs.
+
+### `telegram/backend.py` - Telegram transport backend
+
+Adapter that validates Telegram config, runs onboarding, and builds/runs the Telegram bridge.
+
 ### `cli.py` - CLI entry point
 
 | Component | Purpose |
 |-----------|---------|
 | `run()` / `main()` | Typer CLI entry points |
-| `_parse_bridge_config()` | Reads config + builds `TelegramBridgeConfig` + `ExecBridgeConfig` |
+| `_run_auto_router()` | Loads settings, resolves transport + engine, builds router, delegates to transport backend |
 
 ### `progress.py` - Progress tracking
 
@@ -261,6 +274,7 @@ Environment flags:
 - `PI_CODING_AGENT_DIR` (override Pi agent session directory base path)
 
 CLI flag: `--debug` enables debug logging (overrides `TAKOPI_LOG_LEVEL`).
+CLI flag: `--transport <id>` overrides the configured transport backend.
 
 ### `telegram/onboarding.py` - Setup validation
 
