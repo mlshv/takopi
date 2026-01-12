@@ -1,5 +1,13 @@
 # changelog
 
+## v0.17.1 (2026-01-12)
+
+### fixes
+
+- fix telegram /new command crash [#106](https://github.com/banteg/takopi/pull/106)
+- track telegram sessions for plugin runs [#107](https://github.com/banteg/takopi/pull/107)
+- align telegram prompt upload resume flow [#105](https://github.com/banteg/takopi/pull/105)
+
 ## v0.17.0 (2026-01-12)
 
 ### changes
