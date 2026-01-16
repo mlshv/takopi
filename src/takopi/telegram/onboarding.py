@@ -264,35 +264,25 @@ async def wait_for_chat(token: str) -> ChatInfo:
                 continue
             if not updates:
                 continue
-            offset = updates[-1].update_id + 1
             update = updates[-1]
+            offset = update.update_id + 1
             msg = update.message
-            if not isinstance(msg, dict):
+            if msg is None:
                 continue
-            sender = msg.get("from")
-            if isinstance(sender, dict) and sender.get("is_bot") is True:
+            sender = msg.from_
+            if sender is not None and sender.is_bot is True:
                 continue
-            chat = msg.get("chat")
-            if not isinstance(chat, dict):
+            chat = msg.chat
+            if chat is None:
                 continue
-            chat_id = chat.get("id")
-            if not isinstance(chat_id, int):
-                continue
+            chat_id = chat.id
             return ChatInfo(
                 chat_id=chat_id,
-                username=chat.get("username")
-                if isinstance(chat.get("username"), str)
-                else None,
-                title=chat.get("title") if isinstance(chat.get("title"), str) else None,
-                first_name=chat.get("first_name")
-                if isinstance(chat.get("first_name"), str)
-                else None,
-                last_name=chat.get("last_name")
-                if isinstance(chat.get("last_name"), str)
-                else None,
-                chat_type=chat.get("type")
-                if isinstance(chat.get("type"), str)
-                else None,
+                username=chat.username,
+                title=chat.title,
+                first_name=chat.first_name,
+                last_name=chat.last_name,
+                chat_type=chat.type,
             )
     finally:
         await bot.close()
