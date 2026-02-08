@@ -1,5 +1,19 @@
 # changelog
 
+## v0.21.5 (2026-02-08)
+
+### fixes
+
+- dedupe redelivered telegram updates to prevent duplicate runs in DMs [#198](https://github.com/banteg/takopi/pull/198)
+
+### changes
+
+- read package version from metadata instead of a hardcoded `__version__` constant
+
+### docs
+
+- rotate telegram invite link
+
 ## v0.21.4 (2026-01-22)
 
 ### changes
