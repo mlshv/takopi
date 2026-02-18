@@ -12,6 +12,7 @@ from .reply import make_reply
 
 if TYPE_CHECKING:
     from ..bridge import TelegramBridgeConfig
+    from ..client import BotClient
 
 logger = get_logger(__name__)
 
@@ -63,7 +64,9 @@ async def handle_callback_cancel(
     query: TelegramCallbackQuery,
     running_tasks: RunningTasks,
     scheduler: ThreadScheduler | None = None,
+    source_bot: BotClient | None = None,
 ) -> None:
+    bot = source_bot or query.source_bot or cfg.bot
     progress_ref = MessageRef(channel_id=query.chat_id, message_id=query.message_id)
     running_task = running_tasks.get(progress_ref)
     if running_task is None:
@@ -77,12 +80,12 @@ async def handle_callback_cancel(
                     resume=job.resume_token.value,
                 )
                 await _edit_cancelled_message(cfg, progress_ref, job)
-                await cfg.bot.answer_callback_query(
+                await bot.answer_callback_query(
                     callback_query_id=query.callback_query_id,
                     text="dropped from queue.",
                 )
                 return
-        await cfg.bot.answer_callback_query(
+        await bot.answer_callback_query(
             callback_query_id=query.callback_query_id,
             text="nothing is currently running for that message.",
         )
@@ -93,7 +96,7 @@ async def handle_callback_cancel(
         progress_message_id=query.message_id,
     )
     running_task.cancel_requested.set()
-    await cfg.bot.answer_callback_query(
+    await bot.answer_callback_query(
         callback_query_id=query.callback_query_id,
         text="cancelling...",
     )

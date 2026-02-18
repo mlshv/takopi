@@ -15,6 +15,7 @@ class MessageRef:
     raw: Any | None = field(default=None, compare=False, hash=False)
     thread_id: ThreadId | None = field(default=None, compare=False, hash=False)
     sender_id: int | None = field(default=None, compare=False, hash=False)
+    source_bot_key: str | None = field(default=None, compare=False, hash=False)
 
 
 @dataclass(frozen=True, slots=True)

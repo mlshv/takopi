@@ -198,6 +198,13 @@ async def _validate_topics_setup(cfg: TelegramBridgeConfig) -> None:
         chat_id=cfg.chat_id,
         project_chat_ids=cfg.runtime.project_chat_ids(),
     )
+    for thread_id, agent_bot in cfg.agent_bots.items():
+        await _validate_topics_setup_for(
+            bot=agent_bot,
+            topics=cfg.topics,
+            chat_id=cfg.chat_id,
+            project_chat_ids=cfg.runtime.project_chat_ids(),
+        )
 
 
 async def _validate_topics_setup_for(

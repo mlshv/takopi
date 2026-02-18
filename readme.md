@@ -1,8 +1,43 @@
-# takopi
+# takopi (multi-bot fork)
 
-🐙 *he just wants to help-pi*
+Fork of [banteg/takopi](https://github.com/banteg/takopi) with multi-bot support.
 
-telegram bridge for codex, claude code, opencode, pi. manage multiple projects and worktrees, stream progress, and resume sessions anywhere.
+Upstream takopi manages a single Telegram bot per instance. This fork allows a single instance to manage N bots, each mapped to a specific forum topic via `thread_id`. Built for [FWA](https://github.com/mlshv/fwa), a multi-agent orchestration system where each agent needs its own Telegram bot account so agents can @tag each other in forum topics.
+
+## What's different
+
+A single takopi instance can now run multiple Telegram bots. Each bot is mapped to a forum topic thread. Messages in a topic are handled by the corresponding bot; messages in unbound topics fall back to the primary bot. Everything else (projects, worktrees, resume, plugins) works the same as upstream.
+
+### Multi-bot config
+
+```toml
+[transports.telegram]
+bot_token = "primary-token"     # primary bot - handles General topic + fallback
+chat_id = -100123456789
+
+[transports.telegram.agents]
+# topic thread_id -> bot_token mapping
+101 = "token-for-backlog-bot"
+102 = "token-for-builder-bot"
+103 = "token-for-analyst-bot"
+```
+
+When `agents` is absent or empty, behavior is identical to upstream single-bot mode. Existing configs work without changes.
+
+### How it works
+
+- Each agent bot polls its own updates independently (fan-in via anyio streams)
+- Updates are deduped per-bot using `(bot_key, update_id)` tuples, so cross-bot update ID collisions don't cause false drops
+- Bot resolution for send/edit/delete follows a chain: message's `source_bot_key` -> internal sent-message map -> thread_id lookup -> primary bot fallback
+- File operations (upload/download), voice transcription, and callback queries all route through the correct source bot
+- @mention routing checks the source bot's username specifically to avoid cross-bot trigger races
+- Duplicate tokens (primary appearing in agents, or agent tokens repeated) are rejected at config validation
+
+---
+
+*Everything below is from upstream.*
+
+---
 
 ## features
 
@@ -70,4 +105,3 @@ see [`docs/how-to/write-a-plugin.md`](docs/how-to/write-a-plugin.md) and [`docs/
 ## development
 
 see [`docs/reference/specification.md`](docs/reference/specification.md) and [`docs/developing.md`](docs/developing.md).
-

@@ -109,7 +109,8 @@ async def _check_file_permissions(
         return True
     if msg.is_private:
         return True
-    member = await cfg.bot.get_chat_member(msg.chat_id, sender_id)
+    bot = msg.source_bot or cfg.bot
+    member = await bot.get_chat_member(msg.chat_id, sender_id)
     if member is None:
         await reply(text="failed to verify file transfer permissions.")
         return False
@@ -189,7 +190,9 @@ async def _save_document_payload(
     rel_path: Path | None,
     base_dir: Path | None,
     force: bool,
+    source_bot: object | None = None,
 ) -> _FilePutResult:
+    bot = source_bot if source_bot is not None else cfg.bot
     name = default_upload_name(document.file_name, None)
     if (
         document.file_size is not None
@@ -201,7 +204,7 @@ async def _save_document_payload(
             size=None,
             error="file is too large to upload.",
         )
-    file_info = await cfg.bot.get_file(document.file_id)
+    file_info = await bot.get_file(document.file_id)
     if file_info is None:
         return _FilePutResult(
             name=name,
@@ -250,7 +253,7 @@ async def _save_document_payload(
                 size=None,
                 error="file already exists; use --force to overwrite.",
             )
-    payload = await cfg.bot.download_file(file_path)
+    payload = await bot.download_file(file_path)
     if payload is None:
         return _FilePutResult(
             name=name,
@@ -574,7 +577,8 @@ async def _handle_file_get(
     if len(payload) > cfg.files.max_download_bytes:
         await reply(text="file is too large to send.")
         return
-    sent = await cfg.bot.send_document(
+    file_bot = msg.source_bot or cfg.bot
+    sent = await file_bot.send_document(
         chat_id=msg.chat_id,
         filename=filename,
         content=payload,

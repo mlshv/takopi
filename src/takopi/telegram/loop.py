@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -11,6 +11,7 @@ import anyio
 from anyio.abc import TaskGroup
 
 from ..config import ConfigError
+from ..lockfile import token_fingerprint
 from ..config_watch import ConfigReload, watch_config as watch_config_changes
 from ..commands import list_command_ids
 from ..directives import DirectiveError
@@ -59,7 +60,7 @@ from .topics import (
     _topics_chat_project,
     _validate_topics_setup,
 )
-from .client import poll_incoming
+from .client import BotClient, poll_incoming
 from .chat_prefs import ChatPrefsStore, resolve_prefs_path
 from .chat_sessions import ChatSessionStore, resolve_sessions_path
 from .engine_overrides import merge_overrides
@@ -312,6 +313,29 @@ async def _drain_backlog(cfg: TelegramBridgeConfig, offset: int | None) -> int |
         drained += len(updates)
 
 
+async def _drain_backlog_for_bot(
+    bot: BotClient, offset: int | None, *, bot_key: str
+) -> int | None:
+    drained = 0
+    while True:
+        updates = await bot.get_updates(
+            offset=offset,
+            timeout_s=0,
+            allowed_updates=["message", "callback_query"],
+        )
+        if updates is None:
+            logger.info("startup.agent_backlog.failed", bot_key=bot_key)
+            return offset
+        if not updates:
+            if drained:
+                logger.info(
+                    "startup.agent_backlog.drained", bot_key=bot_key, count=drained
+                )
+            return offset
+        offset = updates[-1].update_id + 1
+        drained += len(updates)
+
+
 async def poll_updates(
     cfg: TelegramBridgeConfig,
     *,
@@ -321,13 +345,76 @@ async def poll_updates(
     offset = await _drain_backlog(cfg, offset)
     await _send_startup(cfg)
 
-    async for msg in poll_incoming(
-        cfg.bot,
-        chat_ids=lambda: _allowed_chat_ids(cfg),
-        offset=offset,
-        sleep=sleep,
-    ):
-        yield msg
+    if not cfg.agent_bots:
+        async for msg in poll_incoming(
+            cfg.bot,
+            chat_ids=lambda: _allowed_chat_ids(cfg),
+            offset=offset,
+            sleep=sleep,
+        ):
+            yield msg
+        return
+
+    primary_key = cfg.primary_bot_key or "primary"
+    primary_me = await cfg.bot.get_me()
+    primary_bot_id = primary_me.id if primary_me is not None else None
+
+    all_bots: dict[str, tuple[BotClient, int | None, int | None]] = {
+        primary_key: (cfg.bot, offset, primary_bot_id),
+    }
+    for agent_key, agent_bot in cfg.bot_key_to_client.items():
+        if agent_bot is cfg.bot:
+            continue
+        agent_offset = await _drain_backlog_for_bot(agent_bot, None, bot_key=agent_key)
+        agent_me = await agent_bot.get_me()
+        agent_bot_id = agent_me.id if agent_me is not None else None
+        all_bots[agent_key] = (agent_bot, agent_offset, agent_bot_id)
+
+    send_stream, receive_stream = anyio.create_memory_object_stream[TelegramIncomingUpdate](256)
+
+    async def poll_single(
+        bot: _BotClient,
+        bot_offset: int | None,
+        send_clone: anyio.abc.ObjectSendStream[TelegramIncomingUpdate],
+        bot_key: str,
+        bot_id: int | None,
+        chat_ids_fn: Callable[[], set[int]],
+    ) -> None:
+        async with send_clone:
+            async for msg in poll_incoming(
+                bot,
+                chat_ids=chat_ids_fn,
+                offset=bot_offset,
+                sleep=sleep,
+            ):
+                msg = replace(
+                    msg,
+                    source_bot=bot,
+                    source_bot_key=bot_key,
+                    source_bot_id=bot_id,
+                )
+                await send_clone.send(msg)
+
+    async with anyio.create_task_group() as tg:
+        for bot_key, (bot, bot_offset, bot_id) in all_bots.items():
+            if bot is cfg.bot:
+                chat_ids_fn = lambda: _allowed_chat_ids(cfg)
+            else:
+                chat_ids_fn = lambda: {cfg.chat_id}
+            tg.start_soon(
+                poll_single,
+                bot,
+                bot_offset,
+                send_stream.clone(),
+                bot_key,
+                bot_id,
+                chat_ids_fn,
+            )
+        await send_stream.aclose()
+
+        async with receive_stream:
+            async for update in receive_stream:
+                yield update
 
 
 @dataclass(slots=True)
@@ -412,6 +499,9 @@ def _classify_message(
     )
 
 
+_DedupeKey = tuple[str | None, int]
+
+
 @dataclass(slots=True)
 class TelegramLoopState:
     running_tasks: RunningTasks
@@ -427,13 +517,15 @@ class TelegramLoopState:
     resolved_topics_scope: str | None
     topics_chat_ids: frozenset[int]
     bot_username: str | None
+    bot_usernames: dict[str, str]
     forward_coalesce_s: float
     media_group_debounce_s: float
     transport_id: str | None
-    seen_update_ids: set[int]
-    seen_update_order: deque[int]
+    seen_update_ids: set[_DedupeKey]
+    seen_update_order: deque[_DedupeKey]
     seen_message_keys: set[MessageKey]
     seen_messages_order: deque[MessageKey]
+    bot_key_to_client: dict[str, object]
 
 
 if TYPE_CHECKING:
@@ -970,6 +1062,7 @@ async def run_main_loop(
         resolved_topics_scope=None,
         topics_chat_ids=frozenset(),
         bot_username=None,
+        bot_usernames={},
         forward_coalesce_s=max(0.0, float(cfg.forward_coalesce_s)),
         media_group_debounce_s=max(0.0, float(cfg.media_group_debounce_s)),
         transport_id=transport_id,
@@ -977,6 +1070,7 @@ async def run_main_loop(
         seen_update_order=deque(),
         seen_message_keys=set(),
         seen_messages_order=deque(),
+        bot_key_to_client={},
     )
 
     def refresh_topics_scope() -> None:
@@ -1052,6 +1146,25 @@ async def run_main_loop(
             state.bot_username = me.username.lower()
         else:
             logger.info("trigger_mode.bot_username.unavailable")
+
+        state.bot_key_to_client = dict(cfg.bot_key_to_client)
+        if cfg.primary_bot_key is not None and me is not None and me.username:
+            state.bot_usernames[cfg.primary_bot_key] = me.username.lower()
+        for agent_key, agent_bot in cfg.bot_key_to_client.items():
+            if agent_bot is cfg.bot:
+                continue
+            try:
+                agent_me = await agent_bot.get_me()
+            except Exception as exc:  # noqa: BLE001
+                logger.info(
+                    "trigger_mode.agent_bot_username.failed",
+                    bot_key=agent_key,
+                    error=str(exc),
+                    error_type=exc.__class__.__name__,
+                )
+                agent_me = None
+            if agent_me is not None and agent_me.username:
+                state.bot_usernames[agent_key] = agent_me.username.lower()
         async with anyio.create_task_group() as tg:
             poller_fn: Callable[
                 [TelegramBridgeConfig], AsyncIterator[TelegramIncomingUpdate]
@@ -1661,18 +1774,24 @@ async def run_main_loop(
                     chat_prefs=state.chat_prefs,
                     topic_store=state.topic_store,
                 )
-                if trigger_mode == "mentions" and not should_trigger_run(
-                    msg,
-                    bot_username=state.bot_username,
-                    runtime=cfg.runtime,
-                    command_ids=state.command_ids,
-                    reserved_chat_commands=state.reserved_chat_commands,
-                ):
-                    return
+                if trigger_mode == "mentions":
+                    source_username = (
+                        state.bot_usernames.get(msg.source_bot_key)
+                        if msg.source_bot_key is not None
+                        else state.bot_username
+                    )
+                    if not should_trigger_run(
+                        msg,
+                        bot_username=source_username or state.bot_username,
+                        runtime=cfg.runtime,
+                        command_ids=state.command_ids,
+                        reserved_chat_commands=state.reserved_chat_commands,
+                    ):
+                        return
 
                 if msg.voice is not None:
                     text = await transcribe_voice(
-                        bot=cfg.bot,
+                        bot=msg.source_bot or cfg.bot,
                         msg=msg,
                         enabled=cfg.voice_transcription,
                         model=cfg.voice_transcription_model,
@@ -1800,20 +1919,23 @@ async def run_main_loop(
                         return
                 if update.update_id is not None:
                     update_id = update.update_id
-                    if update_id in state.seen_update_ids:
+                    bot_key = getattr(update, "source_bot_key", None)
+                    dedup_key: _DedupeKey = (bot_key, update_id)
+                    if dedup_key in state.seen_update_ids:
                         logger.debug(
                             "update.ignored",
                             reason="duplicate_update",
                             update_id=update_id,
+                            bot_key=bot_key,
                             chat_id=update.chat_id,
                             sender_id=update.sender_id,
                         )
                         return
-                    state.seen_update_ids.add(update_id)
-                    state.seen_update_order.append(update_id)
+                    state.seen_update_ids.add(dedup_key)
+                    state.seen_update_order.append(dedup_key)
                     if len(state.seen_update_order) > _SEEN_UPDATES_LIMIT:
-                        oldest_update_id = state.seen_update_order.popleft()
-                        state.seen_update_ids.discard(oldest_update_id)
+                        oldest = state.seen_update_order.popleft()
+                        state.seen_update_ids.discard(oldest)
                 elif isinstance(update, TelegramIncomingMessage):
                     key = (update.chat_id, update.message_id)
                     if key in state.seen_message_keys:
@@ -1831,6 +1953,7 @@ async def run_main_loop(
                         oldest = state.seen_messages_order.popleft()
                         state.seen_message_keys.discard(oldest)
                 if isinstance(update, TelegramCallbackQuery):
+                    cb_bot = update.source_bot or cfg.bot
                     if update.data == CANCEL_CALLBACK_DATA:
                         tg.start_soon(
                             handle_callback_cancel,
@@ -1838,10 +1961,11 @@ async def run_main_loop(
                             update,
                             state.running_tasks,
                             scheduler,
+                            cb_bot,
                         )
                     else:
                         tg.start_soon(
-                            cfg.bot.answer_callback_query,
+                            cb_bot.answer_callback_query,
                             update.callback_query_id,
                         )
                     return

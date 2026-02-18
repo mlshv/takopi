@@ -121,18 +121,20 @@ async def _set_command_menu(cfg: TelegramBridgeConfig) -> None:
     )
     if not commands:
         return
-    try:
-        ok = await cfg.bot.set_my_commands(commands)
-    except Exception as exc:  # noqa: BLE001
-        logger.info(
-            "startup.command_menu.failed",
-            error=str(exc),
-            error_type=exc.__class__.__name__,
-        )
-        return
-    if not ok:
-        logger.info("startup.command_menu.rejected")
-        return
+    all_bots = [cfg.bot, *cfg.agent_bots.values()]
+    for bot in all_bots:
+        try:
+            ok = await bot.set_my_commands(commands)
+        except Exception as exc:  # noqa: BLE001
+            logger.info(
+                "startup.command_menu.failed",
+                error=str(exc),
+                error_type=exc.__class__.__name__,
+            )
+            continue
+        if not ok:
+            logger.info("startup.command_menu.rejected")
+            continue
     logger.info(
         "startup.command_menu.updated",
         commands=[cmd["command"] for cmd in commands],

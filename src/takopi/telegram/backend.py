@@ -9,6 +9,7 @@ import anyio
 from ..backends import EngineBackend
 from ..logging import get_logger
 from ..runner_bridge import ExecBridgeConfig
+from ..lockfile import token_fingerprint
 from ..settings import TelegramTopicsSettings, TelegramTransportSettings
 from ..transport_runtime import TransportRuntime
 from ..transports import SetupResult, TransportBackend
@@ -120,7 +121,20 @@ class TelegramBackend(TransportBackend):
             topics=settings.topics,
         )
         bot = TelegramClient(token)
-        transport = TelegramTransport(bot)
+        agent_bots: dict[int, TelegramClient] = {}
+        bot_key_to_client: dict[str, TelegramClient] = {}
+        primary_key = token_fingerprint(token)
+        bot_key_to_client[primary_key] = bot
+        for thread_id, agent_token in settings.agents.items():
+            agent_client = TelegramClient(agent_token)
+            agent_bots[thread_id] = agent_client
+            agent_key = token_fingerprint(agent_token)
+            bot_key_to_client[agent_key] = agent_client
+        transport = TelegramTransport(
+            bot,
+            agent_bots=agent_bots,
+            bot_key_to_client=bot_key_to_client,
+        )
         presenter = TelegramPresenter(message_overflow=settings.message_overflow)
         exec_cfg = ExecBridgeConfig(
             transport=transport,
@@ -145,6 +159,9 @@ class TelegramBackend(TransportBackend):
             allowed_user_ids=tuple(settings.allowed_user_ids),
             topics=settings.topics,
             files=settings.files,
+            agent_bots=agent_bots,
+            bot_key_to_client=bot_key_to_client,
+            primary_bot_key=primary_key,
         )
 
         async def run_loop() -> None:

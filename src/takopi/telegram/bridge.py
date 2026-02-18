@@ -132,11 +132,57 @@ class TelegramBridgeConfig:
     files: TelegramFilesSettings = field(default_factory=TelegramFilesSettings)
     chat_ids: tuple[int, ...] | None = None
     topics: TelegramTopicsSettings = field(default_factory=TelegramTopicsSettings)
+    agent_bots: dict[int, BotClient] = field(default_factory=dict)
+    bot_key_to_client: dict[str, BotClient] = field(default_factory=dict)
+    primary_bot_key: str | None = None
+
+    def bot_for_thread(self, thread_id: int | None) -> BotClient:
+        if thread_id is not None and thread_id in self.agent_bots:
+            return self.agent_bots[thread_id]
+        return self.bot
+
+
+_SENT_BOTS_LIMIT = 2048
 
 
 class TelegramTransport:
-    def __init__(self, bot: BotClient) -> None:
+    def __init__(
+        self,
+        bot: BotClient,
+        agent_bots: dict[int, BotClient] | None = None,
+        *,
+        bot_key_to_client: dict[str, BotClient] | None = None,
+    ) -> None:
         self._bot = bot
+        self._agent_bots = agent_bots or {}
+        self._bot_key_to_client = bot_key_to_client or {}
+        self._sent_bots: dict[tuple[int, int], str] = {}
+        self._sent_bots_order: list[tuple[int, int]] = []
+
+    def _resolve_bot(self, thread_id: int | None) -> BotClient:
+        if thread_id is not None and thread_id in self._agent_bots:
+            return self._agent_bots[thread_id]
+        return self._bot
+
+    def _resolve_bot_for_ref(self, ref: MessageRef) -> BotClient:
+        if ref.source_bot_key and ref.source_bot_key in self._bot_key_to_client:
+            return self._bot_key_to_client[ref.source_bot_key]
+        key = (cast(int, ref.channel_id), cast(int, ref.message_id))
+        bot_key = self._sent_bots.get(key)
+        if bot_key is not None and bot_key in self._bot_key_to_client:
+            return self._bot_key_to_client[bot_key]
+        thread_id = cast(int | None, ref.thread_id) if ref.thread_id is not None else None
+        return self._resolve_bot(thread_id)
+
+    def _track_sent(self, chat_id: int, message_id: int, bot_key: str | None) -> None:
+        if bot_key is None:
+            return
+        key = (chat_id, message_id)
+        self._sent_bots[key] = bot_key
+        self._sent_bots_order.append(key)
+        while len(self._sent_bots_order) > _SENT_BOTS_LIMIT:
+            old = self._sent_bots_order.pop(0)
+            self._sent_bots.pop(old, None)
 
     @staticmethod
     def _extract_followups(message: RenderedMessage) -> list[RenderedMessage]:
@@ -153,9 +199,11 @@ class TelegramTransport:
         reply_to_message_id: int | None,
         message_thread_id: int | None,
         notify: bool,
+        bot: BotClient | None = None,
     ) -> None:
+        target_bot = bot or self._bot
         for followup in followups:
-            await self._bot.send_message(
+            await target_bot.send_message(
                 chat_id=chat_id,
                 text=followup.text,
                 entities=followup.extra.get("entities"),
@@ -168,6 +216,8 @@ class TelegramTransport:
 
     async def close(self) -> None:
         await self._bot.close()
+        for agent_bot in self._agent_bots.values():
+            await agent_bot.close()
 
     async def send(
         self,
@@ -208,8 +258,16 @@ class TelegramTransport:
                 message.extra.get("followup_thread_id"),
             )
             notify = bool(message.extra.get("followup_notify", True))
+        bot = self._resolve_bot(
+            cast(int, message_thread_id) if message_thread_id is not None else None
+        )
+        bot_key: str | None = None
+        for k, v in self._bot_key_to_client.items():
+            if v is bot:
+                bot_key = k
+                break
         followups = self._extract_followups(message)
-        sent = await self._bot.send_message(
+        sent = await bot.send_message(
             chat_id=chat_id,
             text=message.text,
             entities=message.extra.get("entities"),
@@ -229,6 +287,7 @@ class TelegramTransport:
                 reply_to_message_id=reply_to_message_id,
                 message_thread_id=message_thread_id,
                 notify=notify,
+                bot=bot,
             )
         message_id = sent.message_id
         thread_id = (
@@ -236,11 +295,13 @@ class TelegramTransport:
             if sent.message_thread_id is not None
             else message_thread_id
         )
+        self._track_sent(chat_id, message_id, bot_key)
         return MessageRef(
             channel_id=chat_id,
             message_id=message_id,
             raw=sent,
             thread_id=thread_id,
+            source_bot_key=bot_key,
         )
 
     async def edit(
@@ -248,11 +309,12 @@ class TelegramTransport:
     ) -> MessageRef | None:
         chat_id = cast(int, ref.channel_id)
         message_id = cast(int, ref.message_id)
+        bot = self._resolve_bot_for_ref(ref)
         entities = message.extra.get("entities")
         parse_mode = message.extra.get("parse_mode")
         reply_markup = message.extra.get("reply_markup")
         followups = self._extract_followups(message)
-        edited = await self._bot.edit_message_text(
+        edited = await bot.edit_message_text(
             chat_id=chat_id,
             message_id=message_id,
             text=message.text,
@@ -277,6 +339,7 @@ class TelegramTransport:
                 reply_to_message_id=reply_to_message_id,
                 message_thread_id=message_thread_id,
                 notify=notify,
+                bot=bot,
             )
         message_id = edited.message_id
         thread_id = (
@@ -289,10 +352,12 @@ class TelegramTransport:
             message_id=message_id,
             raw=edited,
             thread_id=thread_id,
+            source_bot_key=ref.source_bot_key,
         )
 
     async def delete(self, *, ref: MessageRef) -> bool:
-        return await self._bot.delete_message(
+        bot = self._resolve_bot_for_ref(ref)
+        return await bot.delete_message(
             chat_id=cast(int, ref.channel_id),
             message_id=cast(int, ref.message_id),
         )
@@ -353,10 +418,11 @@ async def handle_callback_cancel(
     query: TelegramCallbackQuery,
     running_tasks: RunningTasks,
     scheduler: ThreadScheduler | None = None,
+    source_bot: BotClient | None = None,
 ) -> None:
     from .commands import handle_callback_cancel as _handle_callback_cancel
 
-    await _handle_callback_cancel(cfg, query, running_tasks, scheduler)
+    await _handle_callback_cancel(cfg, query, running_tasks, scheduler, source_bot=source_bot)
 
 
 async def send_with_resume(

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .client import BotClient
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +45,9 @@ class TelegramIncomingMessage:
     document: TelegramDocument | None = None
     raw: dict[str, Any] | None = None
     update_id: int | None = None
+    source_bot_key: str | None = None
+    source_bot_id: int | None = None
+    source_bot: BotClient | None = None
 
     @property
     def is_private(self) -> bool:
@@ -60,6 +66,10 @@ class TelegramCallbackQuery:
     sender_id: int | None
     raw: dict[str, Any] | None = None
     update_id: int | None = None
+    thread_id: int | None = None
+    source_bot_key: str | None = None
+    source_bot_id: int | None = None
+    source_bot: BotClient | None = None
 
 
 TelegramIncomingUpdate = TelegramIncomingMessage | TelegramCallbackQuery

@@ -107,6 +107,24 @@ class TelegramTransportSettings(BaseModel):
     media_group_debounce_s: float = Field(default=1.0, ge=0)
     topics: TelegramTopicsSettings = Field(default_factory=TelegramTopicsSettings)
     files: TelegramFilesSettings = Field(default_factory=TelegramFilesSettings)
+    agents: dict[int, NonEmptyStr] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_agent_tokens(self) -> TelegramTransportSettings:
+        if not self.agents:
+            return self
+        seen: set[str] = set()
+        for thread_id, token in self.agents.items():
+            if token == self.bot_token:
+                raise ValueError(
+                    f"agents[{thread_id}] token must not match the primary bot_token"
+                )
+            if token in seen:
+                raise ValueError(
+                    f"agents[{thread_id}] token is a duplicate of another agent token"
+                )
+            seen.add(token)
+        return self
 
 
 class TransportsSettings(BaseModel):
